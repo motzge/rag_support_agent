@@ -36,7 +36,7 @@ with st.sidebar:
         "Add documents",
         type=["pdf", "txt", "md"],
         accept_multiple_files=True,
-        help="Drag files here — the bot learns them instantly.",
+        help="Drag files here to add them to the knowledge base.",
     )
     if uploaded:
         with st.spinner("Reading documents..."):
