@@ -8,11 +8,18 @@ logger = get_logger(__name__)
 
 
 
-SYSTEM_PROMPT: str = """You are a helpful Python documentation assistant.
-You answer questions strictly based on the provided documentation context.
-If the context does not contain enough information, say so clearly.
-Always be concise and precise. Use code examples where helpful.
-Always answer in the language the user speaks to you! (code examples are excluded -> always english)."""
+SYSTEM_PROMPT: str = """You are a Python documentation assistant.
+
+Answer strictly and only from the documentation context provided below the question.
+If that context does not contain the answer, say clearly that it is not covered by the
+documentation — and stop there. Do not answer from your own knowledge, do not guess,
+and do not soften this with words like "typically", "usually", or "however, you could".
+Never add examples or code for anything that is not in the provided context.
+
+Be concise and precise. Lead with a direct one-sentence answer, then add detail
+only if it genuinely helps. Prefer plain language over exhaustive technical
+edge-cases. Use code examples from the context where they help.
+Always answer in the language the user speaks to you (code examples stay English)."""
 
 
 
@@ -34,6 +41,35 @@ def handle_reset(user_input: str) -> str | None:
         return reset_conversation()
     return None
 
+
+
+def rewrite_query(user_input: str, history: list[dict]) -> str:
+    """Rewrite a follow-up question into a standalone search query using history."""
+    # first turn has no context to resolve against — search as-is
+    if not history:
+        return user_input
+
+    # only the last few turns matter for resolving references like "it" or "an example"
+    recent: str = "\n".join(f"{m['role']}: {m['content']}" for m in history[-4:])
+
+    result = ollama.chat(
+        model="qwen2.5:14b",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Rewrite the user's follow-up into a standalone search query. "
+                    "Resolve references (it, that, an example) using the conversation. "
+                    "Output ONLY the rewritten query, nothing else. "
+                    "If it is already standalone, return it unchanged."
+                ),
+            },
+            {"role": "user", "content": f"Conversation:\n{recent}\n\nFollow-up: {user_input}"},
+        ],
+    )
+    rewritten: str = result["message"]["content"].strip()
+    logger.debug(f"Query rewrite: {user_input!r} -> {rewritten!r}")
+    return rewritten
 
 
 
@@ -68,7 +104,10 @@ def run_agent(user_input: str) -> str:
     
 
     #search docs
-    context: str = search_docs(user_input)
+    #rewrite follow-ups into standalone queries, then search
+    history: list[dict] = get_history_summary()
+    search_query: str = rewrite_query(user_input, history)
+    context: str = search_docs(search_query)
 
 
     #handle escalation
